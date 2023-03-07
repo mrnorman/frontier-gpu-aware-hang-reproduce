@@ -23,6 +23,7 @@ There is also a reproducer with a driver that uses the YAKL library (as in the o
 
 ## My modules for this reproducer
 
+```bash
 (base) [imn@login05:/gpfs/alpine/proj-shared/stf006/imn/frontier/frontier-gpu-aware-hang-reproduce/build] 8-) module -t list
 craype-x86-trento
 libfabric/1.15.2.0
@@ -43,3 +44,4 @@ cmake/3.23.2
 craype-accel-amd-gfx90a
 cray-hdf5/1.12.2.1
 cray-netcdf/4.9.0.1
+```
