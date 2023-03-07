@@ -12,7 +12,7 @@ git clone git@github.com:mrnorman/frontier-gpu-aware-hang-reproduce.git
 cd frontier-gpu-aware-hang-reproduce
 git submodule update --init
 cd build
-# Get an interactive job
+# salloc -A ABC123 -J debug_job -t 1:00:00 -N 8 -p batch
 # The following should succeed
 source crusher_gpu.env            && ./cmakescript.sh && make -j4 && srun -N8 -n64 --gpus-per-node=8 --ntasks-per-gpu=1 -c 1 --gpu-bind=closest ./driver_without_yakl
 # The following should hang on line 124
@@ -21,10 +21,14 @@ source crusher_gpu_expose_bug.env && ./cmakescript.sh && make -j4 && srun -N8 -n
 
 There is also a reproducer with a driver that uses the YAKL library (as in the original app), but I figured you wouldn't want to use that when there's a simpler reproducer without that library.
 
+## Output files
+
+This writes a one-file-per-MPI-task record of debugging for convenience to see that all tasks are stalling at the same line with the above conditions are met.
+
 ## My modules for this reproducer
 
 ```bash
-(base) [imn@login05:/gpfs/alpine/proj-shared/stf006/imn/frontier/frontier-gpu-aware-hang-reproduce/build] 8-) module -t list
+[imn@login05:/gpfs/alpine/proj-shared/stf006/imn/frontier/frontier-gpu-aware-hang-reproduce/build] 8-) module -t list
 craype-x86-trento
 libfabric/1.15.2.0
 craype-network-ofi
