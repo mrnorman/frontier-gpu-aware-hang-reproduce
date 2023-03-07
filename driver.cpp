@@ -1,20 +1,10 @@
 
 #include "YAKL.h"
 
-typedef double real;
-typedef yakl::Array<real,1,yakl::memDevice> real1d;
-typedef yakl::Array<real,2,yakl::memDevice> real2d;
-typedef yakl::Array<real,3,yakl::memDevice> real3d;
-typedef yakl::Array<real,4,yakl::memDevice> real4d;
-typedef yakl::Array<real,4,yakl::memDevice> real5d;
-typedef yakl::Array<real,5,yakl::memDevice> real6d;
+#define DEBUG_PRINT() yakl::verbose_inform("DEBUG GOT HERE: " , std::string(__FILE__)+std::string(": ")+std::to_string(__LINE__) );
 
-typedef yakl::Array<real,1,yakl::memHost> realHost1d;
-typedef yakl::Array<real,2,yakl::memHost> realHost2d;
-typedef yakl::Array<real,3,yakl::memHost> realHost3d;
-typedef yakl::Array<real,4,yakl::memHost> realHost4d;
-typedef yakl::Array<real,5,yakl::memHost> realHost5d;
-typedef yakl::Array<real,6,yakl::memHost> realHost6d;
+typedef double real;
+typedef yakl::Array<real,4,yakl::memDevice> real4d;
 
 int main(int argc, char** argv) {
   MPI_Init( &argc , &argv );
@@ -22,18 +12,33 @@ int main(int argc, char** argv) {
   {
     using yakl::c::parallel_for;
     using yakl::c::Bounds;
-    int nx_glob = 1024;
-    int ny_glob = 1024;
-    int nz = 100;
-    int num_tracers = 3;
+    // Simulation parameters
+    int nx_glob       = 1024;
+    int ny_glob       = 1024;
+    int nz            = 100;
+    int num_tracers   = 3;
     int constexpr ord = 3;
     int constexpr hs  = 1;
     int constexpr num_state = 5;
     int npack = num_state + num_tracers;
+    // Pool
+    void *ptr;
+    size_t bytes = 16;
+    bytes *= 1024;
+    bytes *= 1024;
+    bytes *= 1024;
+    #ifdef EXPOSE_THE_BUG
+      bytes += 16*sizeof(size_t);
+    #endif
+    hipMalloc(&ptr,bytes);
+    real *offset = (real *) ptr;
+
+    ////////////////////////////////////////////////////
+    // Setup MPI
+    ////////////////////////////////////////////////////
     int nx, ny, nproc_x, nproc_y, nranks, px, py, i_beg, i_end, j_beg, j_end, myrank;
     bool mainproc;
     yakl::SArray<real,2,3,3> neigh;
-
     MPI_Comm_size( MPI_COMM_WORLD , &nranks );
     MPI_Comm_rank( MPI_COMM_WORLD , &myrank );
 
@@ -75,58 +80,45 @@ int main(int argc, char** argv) {
       }
     }
 
-    real4d state  ("state"  ,num_state  ,nz+2*hs,ny+2*hs,nx+2*hs);
-    real4d tracers("tracers",num_tracers,nz+2*hs,ny+2*hs,nx+2*hs);
-    state = 1;
-    tracers = 1;
+    ///////////////////////////////////////////////////
+    // Mimic time step MPI workflow
+    ///////////////////////////////////////////////////
+    // Create un-managed YAKL arrays wrapping pool pointer
+    real4d state          ("state"          ,offset,num_state  ,nz+2*hs,ny+2*hs,nx+2*hs); offset += state  .size();
+    real4d tracers        ("tracers"        ,offset,num_tracers,nz+2*hs,ny+2*hs,nx+2*hs); offset += tracers.size();
+    real4d halo_send_buf_W("halo_send_buf_W",offset,npack      ,nz     ,ny     ,hs     ); offset += halo_send_buf_W.size();
+    real4d halo_send_buf_E("halo_send_buf_E",offset,npack      ,nz     ,ny     ,hs     ); offset += halo_send_buf_E.size();
+    real4d halo_send_buf_S("halo_send_buf_S",offset,npack      ,nz     ,hs     ,nx     ); offset += halo_send_buf_S.size();
+    real4d halo_send_buf_N("halo_send_buf_N",offset,npack      ,nz     ,hs     ,nx     ); offset += halo_send_buf_N.size();
+    // Launch kernels setting input arrays to 1
+    state           = 1;
+    tracers         = 1;
+    halo_send_buf_W = 1;
+    halo_send_buf_E = 1;
+    halo_send_buf_S = 1;
+    halo_send_buf_N = 1;
 
-    real4d halo_send_buf_W("halo_send_buf_W",npack,nz,ny,hs);
-    real4d halo_send_buf_E("halo_send_buf_E",npack,nz,ny,hs);
-
-    parallel_for( YAKL_AUTO_LABEL() , Bounds<4>(npack,nz,ny,hs) , YAKL_LAMBDA (int v, int k, int j, int ii) {
-      if (v < num_state) {
-        halo_send_buf_W(v,k,j,ii) = state  (v          ,hs+k,hs+j,hs+ii);
-        halo_send_buf_E(v,k,j,ii) = state  (v          ,hs+k,hs+j,nx+ii);
-      } else {
-        halo_send_buf_W(v,k,j,ii) = tracers(v-num_state,hs+k,hs+j,hs+ii);
-        halo_send_buf_E(v,k,j,ii) = tracers(v-num_state,hs+k,hs+j,nx+ii);
-      }
-    });
-
-    real4d halo_send_buf_S("halo_send_buf_S",npack,nz,hs,nx);
-    real4d halo_send_buf_N("halo_send_buf_N",npack,nz,hs,nx);
-
-    parallel_for( YAKL_AUTO_LABEL() , Bounds<4>(npack,nz,hs,nx) , YAKL_LAMBDA (int v, int k, int jj, int i) {
-      if (v < num_state) {
-        halo_send_buf_S(v,k,jj,i) = state  (v          ,hs+k,hs+jj,hs+i);
-        halo_send_buf_N(v,k,jj,i) = state  (v          ,hs+k,ny+jj,hs+i);
-      } else {
-        halo_send_buf_S(v,k,jj,i) = tracers(v-num_state,hs+k,hs+jj,hs+i);
-        halo_send_buf_N(v,k,jj,i) = tracers(v-num_state,hs+k,ny+jj,hs+i);
-      }
-    });
-
-    real4d halo_recv_buf_W("halo_recv_buf_W",npack,nz,ny,hs);
-    real4d halo_recv_buf_E("halo_recv_buf_E",npack,nz,ny,hs);
-    real4d halo_recv_buf_S("halo_recv_buf_S",npack,nz,hs,nx);
-    real4d halo_recv_buf_N("halo_recv_buf_N",npack,nz,hs,nx);
+    real4d halo_recv_buf_W("halo_recv_buf_W",offset,npack,nz,ny,hs); offset += halo_recv_buf_W.size();
+    real4d halo_recv_buf_E("halo_recv_buf_E",offset,npack,nz,ny,hs); offset += halo_recv_buf_E.size();
+    real4d halo_recv_buf_S("halo_recv_buf_S",offset,npack,nz,hs,nx); offset += halo_recv_buf_S.size();
+    real4d halo_recv_buf_N("halo_recv_buf_N",offset,npack,nz,hs,nx); offset += halo_recv_buf_N.size();
 
     MPI_Request sReq[4];
     MPI_Request rReq[4];
 
-    MPI_Datatype mpi_data_type = MPI_DOUBLE;
+    yakl::fence(); DEBUG_PRINT();
+    
+    auto type = MPI_DOUBLE;
+    auto comm = MPI_COMM_WORLD;
+    MPI_Irecv( halo_recv_buf_W.data() , halo_recv_buf_W.size() , type , neigh(1,0) , 0 , comm , &rReq[0] ); DEBUG_PRINT();
+    MPI_Irecv( halo_recv_buf_E.data() , halo_recv_buf_E.size() , type , neigh(1,2) , 1 , comm , &rReq[1] ); DEBUG_PRINT();
+    MPI_Irecv( halo_recv_buf_S.data() , halo_recv_buf_S.size() , type , neigh(0,1) , 2 , comm , &rReq[2] ); DEBUG_PRINT();
+    MPI_Irecv( halo_recv_buf_N.data() , halo_recv_buf_N.size() , type , neigh(2,1) , 3 , comm , &rReq[3] ); DEBUG_PRINT();
 
-    yakl::fence();
-
-    MPI_Irecv( halo_recv_buf_W.data() , halo_recv_buf_W.size() , MPI_DOUBLE , neigh(1,0) , 0 , MPI_COMM_WORLD , &rReq[0] );
-    MPI_Irecv( halo_recv_buf_E.data() , halo_recv_buf_E.size() , MPI_DOUBLE , neigh(1,2) , 1 , MPI_COMM_WORLD , &rReq[1] );
-    MPI_Irecv( halo_recv_buf_S.data() , halo_recv_buf_S.size() , MPI_DOUBLE , neigh(0,1) , 2 , MPI_COMM_WORLD , &rReq[2] );
-    MPI_Irecv( halo_recv_buf_N.data() , halo_recv_buf_N.size() , MPI_DOUBLE , neigh(2,1) , 3 , MPI_COMM_WORLD , &rReq[3] );
-
-    MPI_Isend( halo_send_buf_W.data() , halo_send_buf_W.size() , MPI_DOUBLE , neigh(1,0) , 1 , MPI_COMM_WORLD , &sReq[0] );
-    MPI_Isend( halo_send_buf_E.data() , halo_send_buf_E.size() , MPI_DOUBLE , neigh(1,2) , 0 , MPI_COMM_WORLD , &sReq[1] );
-    MPI_Isend( halo_send_buf_S.data() , halo_send_buf_S.size() , MPI_DOUBLE , neigh(0,1) , 3 , MPI_COMM_WORLD , &sReq[2] );
-    MPI_Isend( halo_send_buf_N.data() , halo_send_buf_N.size() , MPI_DOUBLE , neigh(2,1) , 2 , MPI_COMM_WORLD , &sReq[3] );
+    MPI_Isend( halo_send_buf_W.data() , halo_send_buf_W.size() , type , neigh(1,0) , 1 , comm , &sReq[0] ); DEBUG_PRINT();
+    MPI_Isend( halo_send_buf_E.data() , halo_send_buf_E.size() , type , neigh(1,2) , 0 , comm , &sReq[1] ); DEBUG_PRINT();
+    MPI_Isend( halo_send_buf_S.data() , halo_send_buf_S.size() , type , neigh(0,1) , 3 , comm , &sReq[2] ); DEBUG_PRINT();
+    MPI_Isend( halo_send_buf_N.data() , halo_send_buf_N.size() , type , neigh(2,1) , 2 , comm , &sReq[3] ); DEBUG_PRINT();
 
     MPI_Status  sStat[4];
     MPI_Status  rStat[4];

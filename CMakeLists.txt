@@ -17,3 +17,8 @@ include(${YAKL_HOME}/yakl_utils.cmake)
 yakl_process_target(driver)
 target_link_libraries(driver "${MW_LINK_FLAGS}")
 
+
+add_executable(driver_without_yakl driver_without_yakl.cpp)
+set_source_files_properties(driver_without_yakl.cpp PROPERTIES COMPILE_FLAGS "${YAKL_COMPILER_FLAGS}")
+target_link_libraries(driver_without_yakl "${MW_LINK_FLAGS}")
+

@@ -2,4 +2,5 @@
 
 rm -rf CMakeCache.txt  CMakeFiles  cmake_install.cmake  CTestTestfile.cmake  Makefile  yakl     \
        core  modules  custom_modules  inputs  model  driver  yakl_verbose*.log job_output*.txt  \
+       driver_without_yakl
 
