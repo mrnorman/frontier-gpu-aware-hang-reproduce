@@ -23,6 +23,8 @@ There is also a reproducer with a driver that uses the YAKL library (as in the o
 
 `crusher_gpu_expose_bug.env` is identical to `crusher_gpu.env` except that it defines `-DEXPOSE_THE_BUG`, which adds a small amount beyond 16 GB to the number of bytes allocated in the pool in `driver.cpp` and `driver_without_yakl.cpp`
 
+For detailed flags, please use `make VERBOSE=1`.
+
 ## Output files
 
 This writes a one-file-per-MPI-task record of debugging for convenience to see that all tasks are stalling at the same line with the above conditions are met.
