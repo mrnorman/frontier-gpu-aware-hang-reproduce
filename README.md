@@ -21,6 +21,8 @@ source crusher_gpu_expose_bug.env && ./cmakescript.sh && make -j4 && srun -N8 -n
 
 There is also a reproducer with a driver that uses the YAKL library (as in the original app), but I figured you wouldn't want to use that when there's a simpler reproducer without that library.
 
+`crusher_gpu_expose_bug.env` is identical to `crusher_gpu.env` except that it defines `-DEXPOSE_THE_BUG`, which adds a small amount beyond 16 GB to the number of bytes allocated in the pool in `driver.cpp` and `driver_without_yakl.cpp`
+
 ## Output files
 
 This writes a one-file-per-MPI-task record of debugging for convenience to see that all tasks are stalling at the same line with the above conditions are met.
